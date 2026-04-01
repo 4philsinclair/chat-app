@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 
-// 🔥 IMPORTANT — replace with YOUR Render URL
+// 🔥 YOUR BACKEND URL (correct)
 const BACKEND_URL = "https://chat-app-tks0.onrender.com";
 
 const socket = io(BACKEND_URL);
@@ -13,7 +13,7 @@ function App() {
 
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
-  const [roomId, setRoomId] = useState("room1");
+  const [roomId] = useState("room1");
 
   const [privateKey, setPrivateKey] = useState<CryptoKey | null>(null);
   const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
@@ -35,7 +35,7 @@ function App() {
       console.log("LOGIN RESPONSE:", data);
 
       if (data.success) {
-        setUser(data.username); // 🔥 CRITICAL
+        setUser(data.username); // 🔥 THIS TRIGGERS UI SWITCH
       } else {
         alert(data.error);
       }
@@ -196,54 +196,51 @@ function App() {
   }
 
   // =====================
-  // 🔐 LOGIN SCREEN
-  // =====================
-  if (!user) {
-    return (
-      <div style={{ padding: 20 }}>
-        <h2>Login</h2>
-
-        <input
-          placeholder="Username"
-          onChange={(e) => setUsername(e.target.value)}
-        />
-
-        <input
-          placeholder="Password"
-          type="password"
-          onChange={(e) => setPassword(e.target.value)}
-        />
-
-        <br /><br />
-
-        <button onClick={login}>Login</button>
-        <button onClick={register}>Register</button>
-      </div>
-    );
-  }
-
-  // =====================
-  // 💬 CHAT UI
+  // 🖥 UI
   // =====================
   return (
     <div style={{ padding: 20 }}>
-      <h2>🔐 {user} in {roomId}</h2>
+      {!user ? (
+        <>
+          <h2>Login</h2>
 
-      <div>
-        {messages.map((m, i) => (
-          <div key={i}>
-            💬 {m.sender}: {m.text}
+          <input
+            placeholder="Username"
+            onChange={(e) => setUsername(e.target.value)}
+          />
+
+          <input
+            placeholder="Password"
+            type="password"
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
+          <br /><br />
+
+          <button onClick={login}>Login</button>
+          <button onClick={register}>Register</button>
+        </>
+      ) : (
+        <>
+          <h2>🔐 {user} in {roomId}</h2>
+
+          <div>
+            {messages.map((m, i) => (
+              <div key={i}>
+                💬 {m.sender}: {m.text}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      <input
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder="Message..."
-      />
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Message..."
+          />
 
-      <button onClick={sendMessage}>Send</button>
+          <button onClick={sendMessage}>Send</button>
+        </>
+      )}
     </div>
   );
 }
