@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
-import { io } from "socket.io-client";
+import { io, Socket } from "socket.io-client";
 
-// 🔥 YOUR BACKEND URL (correct)
 const BACKEND_URL = "https://chat-app-tks0.onrender.com";
 
-const socket = io(BACKEND_URL);
-
 function App() {
+  const [socket, setSocket] = useState<Socket | null>(null);
+
   const [user, setUser] = useState<string | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -18,9 +17,17 @@ function App() {
   const [privateKey, setPrivateKey] = useState<CryptoKey | null>(null);
   const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
 
-  // =====================
+  // 🔌 INIT SOCKET (FIX)
+  useEffect(() => {
+    const s = io(BACKEND_URL);
+    setSocket(s);
+
+    return () => {
+      s.disconnect();
+    };
+  }, []);
+
   // 🔐 LOGIN
-  // =====================
   async function login() {
     try {
       const res = await fetch(`${BACKEND_URL}/login`, {
@@ -35,7 +42,7 @@ function App() {
       console.log("LOGIN RESPONSE:", data);
 
       if (data.success) {
-        setUser(data.username); // 🔥 THIS TRIGGERS UI SWITCH
+        setUser(data.username);
       } else {
         alert(data.error);
       }
@@ -45,9 +52,7 @@ function App() {
     }
   }
 
-  // =====================
   // 🔐 REGISTER
-  // =====================
   async function register() {
     try {
       const res = await fetch(`${BACKEND_URL}/register`, {
@@ -59,7 +64,6 @@ function App() {
       });
 
       const data = await res.json();
-      console.log("REGISTER RESPONSE:", data);
 
       if (data.success) {
         alert("Registered! Now login.");
@@ -72,11 +76,9 @@ function App() {
     }
   }
 
-  // =====================
   // 🔑 KEY SETUP
-  // =====================
   useEffect(() => {
-    if (!user) return;
+    if (!user || !socket) return;
 
     async function setup() {
       const keyPair = await crypto.subtle.generateKey(
@@ -97,17 +99,15 @@ function App() {
         userId: user,
         publicKey: Array.from(new Uint8Array(publicKey)),
       });
-
-      console.log("🔑 Joined room:", roomId);
     }
 
     setup();
-  }, [user]);
+  }, [user, socket]);
 
-  // =====================
   // 🔐 SHARED KEY
-  // =====================
   useEffect(() => {
+    if (!socket) return;
+
     socket.on("publicKeys", async (keys) => {
       if (!privateKey || !user) return;
 
@@ -130,18 +130,17 @@ function App() {
           ["encrypt", "decrypt"]
         );
 
-        console.log("🔐 Shared key ready");
         setSharedKey(key);
       }
     });
 
     return () => socket.off("publicKeys");
-  }, [privateKey, user]);
+  }, [socket, privateKey, user]);
 
-  // =====================
   // 📥 RECEIVE
-  // =====================
   useEffect(() => {
+    if (!socket) return;
+
     socket.on("messages", async (msgs) => {
       if (!sharedKey) return;
 
@@ -159,22 +158,18 @@ function App() {
             sender: m.sender,
             text: new TextDecoder().decode(decrypted),
           });
-        } catch {
-          console.log("❌ decrypt failed");
-        }
+        } catch {}
       }
 
       setMessages(newMessages);
     });
 
     return () => socket.off("messages");
-  }, [sharedKey]);
+  }, [socket, sharedKey]);
 
-  // =====================
   // 📤 SEND
-  // =====================
   async function sendMessage() {
-    if (!sharedKey || !input || !user) return;
+    if (!sharedKey || !input || !user || !socket) return;
 
     const data = new TextEncoder().encode(input);
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -195,9 +190,7 @@ function App() {
     setInput("");
   }
 
-  // =====================
-  // 🖥 UI
-  // =====================
+  // UI
   return (
     <div style={{ padding: 20 }}>
       {!user ? (
@@ -235,7 +228,6 @@ function App() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Message..."
           />
 
           <button onClick={sendMessage}>Send</button>
