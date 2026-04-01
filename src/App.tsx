@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("https://chat-app-tks0.onrender.com");
+// 🔥 IMPORTANT — replace with YOUR Render URL
+const BACKEND_URL = "https://chat-app-tks0.onrender.com";
+
+const socket = io(BACKEND_URL);
 
 function App() {
   const [user, setUser] = useState<string | null>(null);
@@ -15,41 +18,63 @@ function App() {
   const [privateKey, setPrivateKey] = useState<CryptoKey | null>(null);
   const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
 
+  // =====================
   // 🔐 LOGIN
+  // =====================
   async function login() {
-    const res = await fetch("hhttps://chat-app-tks0.onrender.com/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+    try {
+      const res = await fetch(`${BACKEND_URL}/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username, password }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
+      console.log("LOGIN RESPONSE:", data);
 
-    if (data.success) {
-      setUser(username);
-    } else {
-      alert(data.error);
+      if (data.success) {
+        setUser(data.username); // 🔥 CRITICAL
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Login failed");
     }
   }
 
+  // =====================
   // 🔐 REGISTER
+  // =====================
   async function register() {
-    const res = await fetch("https://chat-app-tks0.onrender.com/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+    try {
+      const res = await fetch(`${BACKEND_URL}/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username, password }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
+      console.log("REGISTER RESPONSE:", data);
 
-    if (data.success) {
-      alert("Registered!");
-    } else {
-      alert(data.error);
+      if (data.success) {
+        alert("Registered! Now login.");
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Register failed");
     }
   }
 
-  // 🔑 key setup after login
+  // =====================
+  // 🔑 KEY SETUP
+  // =====================
   useEffect(() => {
     if (!user) return;
 
@@ -72,12 +97,16 @@ function App() {
         userId: user,
         publicKey: Array.from(new Uint8Array(publicKey)),
       });
+
+      console.log("🔑 Joined room:", roomId);
     }
 
     setup();
   }, [user]);
 
-  // 🔐 shared key
+  // =====================
+  // 🔐 SHARED KEY
+  // =====================
   useEffect(() => {
     socket.on("publicKeys", async (keys) => {
       if (!privateKey || !user) return;
@@ -101,6 +130,7 @@ function App() {
           ["encrypt", "decrypt"]
         );
 
+        console.log("🔐 Shared key ready");
         setSharedKey(key);
       }
     });
@@ -108,7 +138,9 @@ function App() {
     return () => socket.off("publicKeys");
   }, [privateKey, user]);
 
-  // 📥 receive
+  // =====================
+  // 📥 RECEIVE
+  // =====================
   useEffect(() => {
     socket.on("messages", async (msgs) => {
       if (!sharedKey) return;
@@ -127,7 +159,9 @@ function App() {
             sender: m.sender,
             text: new TextDecoder().decode(decrypted),
           });
-        } catch {}
+        } catch {
+          console.log("❌ decrypt failed");
+        }
       }
 
       setMessages(newMessages);
@@ -136,7 +170,9 @@ function App() {
     return () => socket.off("messages");
   }, [sharedKey]);
 
-  // 📤 send
+  // =====================
+  // 📤 SEND
+  // =====================
   async function sendMessage() {
     if (!sharedKey || !input || !user) return;
 
@@ -159,28 +195,36 @@ function App() {
     setInput("");
   }
 
+  // =====================
   // 🔐 LOGIN SCREEN
+  // =====================
   if (!user) {
     return (
       <div style={{ padding: 20 }}>
         <h2>Login</h2>
+
         <input
           placeholder="Username"
           onChange={(e) => setUsername(e.target.value)}
         />
+
         <input
           placeholder="Password"
           type="password"
           onChange={(e) => setPassword(e.target.value)}
         />
-        <br />
+
+        <br /><br />
+
         <button onClick={login}>Login</button>
         <button onClick={register}>Register</button>
       </div>
     );
   }
 
+  // =====================
   // 💬 CHAT UI
+  // =====================
   return (
     <div style={{ padding: 20 }}>
       <h2>🔐 {user} in {roomId}</h2>
@@ -193,7 +237,12 @@ function App() {
         ))}
       </div>
 
-      <input onChange={(e) => setInput(e.target.value)} />
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="Message..."
+      />
+
       <button onClick={sendMessage}>Send</button>
     </div>
   );
