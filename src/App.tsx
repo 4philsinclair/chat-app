@@ -217,13 +217,40 @@ function App() {
         <>
           <h2>🔐 {user} in {roomId}</h2>
 
-          <div>
-            {messages.map((m, i) => (
-              <div key={i}>
-                💬 {m.sender}: {m.text}
-              </div>
-            ))}
-          </div>
+<div style={{ marginBottom: 20 }}>
+  {messages.map((m, i) => {
+    const isMe = m.sender === user;
+
+    return (
+      <div
+        key={i}
+        style={{
+          display: "flex",
+          justifyContent: isMe ? "flex-end" : "flex-start",
+          marginBottom: 8,
+        }}
+      >
+        <div
+          style={{
+            background: isMe ? "#007bff" : "#e5e5ea",
+            color: isMe ? "white" : "black",
+            padding: "10px 14px",
+            borderRadius: 16,
+            maxWidth: "60%",
+            fontSize: 14,
+          }}
+        >
+          {!isMe && (
+            <div style={{ fontSize: 10, opacity: 0.6 }}>
+              {m.sender}
+            </div>
+          )}
+          {m.text}
+        </div>
+      </div>
+    );
+  })}
+</div>
 
           <input
             value={input}
