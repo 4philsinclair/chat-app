@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
-const sqlite3 = require("sqlite3").verbose();
+const Database = require("better-sqlite3");
 const bcrypt = require("bcrypt");
 
 const app = express();
@@ -15,20 +15,20 @@ const io = new Server(server, {
   cors: { origin: "*" },
 });
 
-// 📦 DATABASE
-const db = new sqlite3.Database("./chat.db");
+// 📦 DATABASE (SYNC, RENDER SAFE)
+const db = new Database("chat.db");
 
 // 👤 USERS TABLE
-db.run(`
+db.prepare(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE,
     password TEXT
   )
-`);
+`).run();
 
 // 💬 MESSAGES TABLE
-db.run(`
+db.prepare(`
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     roomId TEXT,
@@ -36,7 +36,7 @@ db.run(`
     data TEXT,
     iv TEXT
   )
-`);
+`).run();
 
 let publicKeys = {};
 
@@ -51,42 +51,35 @@ app.post("/register", async (req, res) => {
   try {
     const hash = await bcrypt.hash(password, 10);
 
-    db.run(
-      "INSERT INTO users (username, password) VALUES (?, ?)",
-      [username, hash],
-      function (err) {
-        if (err) {
-          return res.status(400).json({ error: "User already exists" });
-        }
-        res.json({ success: true });
-      }
-    );
+    db.prepare(
+      "INSERT INTO users (username, password) VALUES (?, ?)"
+    ).run(username, hash);
+
+    res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: "Server error" });
+    res.status(400).json({ error: "User already exists" });
   }
 });
 
 // LOGIN
-app.post("/login", (req, res) => {
+app.post("/login", async (req, res) => {
   const { username, password } = req.body;
 
-  db.get(
-    "SELECT * FROM users WHERE username = ?",
-    [username],
-    async (err, user) => {
-      if (err || !user) {
-        return res.status(400).json({ error: "User not found" });
-      }
+  const user = db
+    .prepare("SELECT * FROM users WHERE username = ?")
+    .get(username);
 
-      const valid = await bcrypt.compare(password, user.password);
+  if (!user) {
+    return res.status(400).json({ error: "User not found" });
+  }
 
-      if (!valid) {
-        return res.status(400).json({ error: "Wrong password" });
-      }
+  const valid = await bcrypt.compare(password, user.password);
 
-      res.json({ success: true, username });
-    }
-  );
+  if (!valid) {
+    return res.status(400).json({ error: "Wrong password" });
+  }
+
+  res.json({ success: true, username });
 });
 
 // =====================
@@ -102,67 +95,50 @@ io.on("connection", (socket) => {
 
     console.log(`🚪 ${userId} joined ${roomId}`);
 
-    // store key
+    // store public key
     publicKeys[userId] = publicKey;
 
     // broadcast keys
     io.to(roomId).emit("publicKeys", publicKeys);
 
-    // send full message history
-    db.all(
-      "SELECT * FROM messages WHERE roomId = ? ORDER BY id",
-      [roomId],
-      (err, rows) => {
-        if (err) {
-          console.error(err);
-          return;
-        }
+    // load ALL messages (ordered)
+    const rows = db
+      .prepare("SELECT * FROM messages WHERE roomId = ? ORDER BY id")
+      .all(roomId);
 
-        const msgs = rows.map((row) => ({
-          sender: row.sender,
-          data: JSON.parse(row.data),
-          iv: JSON.parse(row.iv),
-        }));
+    const msgs = rows.map((row) => ({
+      sender: row.sender,
+      data: JSON.parse(row.data),
+      iv: JSON.parse(row.iv),
+    }));
 
-        socket.emit("messages", msgs);
-      }
-    );
+    socket.emit("messages", msgs);
   });
 
   // SEND MESSAGE
   socket.on("sendMessage", ({ roomId, sender, data, iv }) => {
-    db.run(
-      "INSERT INTO messages (roomId, sender, data, iv) VALUES (?, ?, ?, ?)",
-      [roomId, sender, JSON.stringify(data), JSON.stringify(iv)],
-      function (err) {
-        if (err) {
-          console.error(err);
-          return;
-        }
+    try {
+      db.prepare(
+        "INSERT INTO messages (roomId, sender, data, iv) VALUES (?, ?, ?, ?)"
+      ).run(roomId, sender, JSON.stringify(data), JSON.stringify(iv));
 
-        console.log(`📨 Message stored in ${roomId}`);
+      console.log(`📨 Message stored in ${roomId}`);
 
-        // reload ALL messages (important for crypto sync)
-        db.all(
-          "SELECT * FROM messages WHERE roomId = ? ORDER BY id",
-          [roomId],
-          (err, rows) => {
-            if (err) {
-              console.error(err);
-              return;
-            }
+      // reload FULL history (critical for crypto sync)
+      const rows = db
+        .prepare("SELECT * FROM messages WHERE roomId = ? ORDER BY id")
+        .all(roomId);
 
-            const msgs = rows.map((row) => ({
-              sender: row.sender,
-              data: JSON.parse(row.data),
-              iv: JSON.parse(row.iv),
-            }));
+      const msgs = rows.map((row) => ({
+        sender: row.sender,
+        data: JSON.parse(row.data),
+        iv: JSON.parse(row.iv),
+      }));
 
-            io.to(roomId).emit("messages", msgs);
-          }
-        );
-      }
-    );
+      io.to(roomId).emit("messages", msgs);
+    } catch (err) {
+      console.error("❌ DB error:", err);
+    }
   });
 
   socket.on("disconnect", () => {
