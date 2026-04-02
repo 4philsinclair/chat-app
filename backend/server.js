@@ -14,9 +14,9 @@ const io = new Server(server, {
   cors: { origin: "*" },
 });
 
-// DB
 const db = new sqlite3.Database("./chat.db");
 
+// DB setup
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
@@ -63,25 +63,23 @@ app.post("/login", (req, res) => {
   );
 });
 
-// ROOMS + KEYS
+// SOCKET
 const publicKeys = {};
 
 io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
 
-  // JOIN ROOM
   socket.on("joinRoom", ({ roomId, userId, publicKey }) => {
     socket.join(roomId);
 
     if (!publicKeys[roomId]) publicKeys[roomId] = {};
     publicKeys[roomId][userId] = publicKey;
 
-    // send keys
     io.to(roomId).emit("publicKeys", publicKeys[roomId]);
 
-    // send old messages
+    // send history
     db.all(
-      "SELECT * FROM messages WHERE roomId = ?",
+      "SELECT * FROM messages WHERE roomId=?",
       [roomId],
       (err, rows) => {
         const msgs = rows.map((r) => ({
@@ -95,29 +93,15 @@ io.on("connection", (socket) => {
     );
   });
 
-  // SEND MESSAGE
   socket.on("sendMessage", ({ roomId, sender, data, iv }) => {
+    const msg = { sender, data, iv };
+
     db.run(
       "INSERT INTO messages (roomId, sender, data, iv) VALUES (?, ?, ?, ?)",
       [roomId, sender, JSON.stringify(data), JSON.stringify(iv)]
     );
 
-    io.to(roomId).emit("messages", [
-      { sender, data, iv },
-    ]);
-  });
-
-  // CALL SIGNALING
-  socket.on("call-offer", (offer) => {
-    socket.broadcast.emit("call-offer", offer);
-  });
-
-  socket.on("call-answer", (answer) => {
-    socket.broadcast.emit("call-answer", answer);
-  });
-
-  socket.on("call-candidate", (c) => {
-    socket.broadcast.emit("call-candidate", c);
+    io.to(roomId).emit("messages", [msg]);
   });
 
   socket.on("disconnect", () => {
