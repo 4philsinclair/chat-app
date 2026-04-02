@@ -3,7 +3,7 @@ import { io } from "socket.io-client";
 
 const BACKEND_URL = "https://chat-app-tks0.onrender.com";
 
-// 🔥 SINGLE SOCKET INSTANCE (FIX)
+// 🔥 SINGLE SOCKET (fix duplicates)
 const socket = io(BACKEND_URL, {
   transports: ["polling", "websocket"],
 });
@@ -18,9 +18,11 @@ function App() {
   const [privateKey, setPrivateKey] = useState<CryptoKey | null>(null);
   const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
 
+  const [joined, setJoined] = useState(false);
+
   const roomId = "room1";
 
-  // LOGIN
+  // 🔐 LOGIN
   async function login() {
     const res = await fetch(`${BACKEND_URL}/login`, {
       method: "POST",
@@ -33,12 +35,13 @@ function App() {
     if (data.success) {
       setUser(data.username);
       setMessages([]);
+      setJoined(false); // 🔥 reset join state
     } else {
       alert(data.error);
     }
   }
 
-  // REGISTER
+  // 🔐 REGISTER
   async function register() {
     const res = await fetch(`${BACKEND_URL}/register`, {
       method: "POST",
@@ -52,9 +55,9 @@ function App() {
     else alert(data.error);
   }
 
-  // KEY SETUP
+  // 🔑 JOIN ROOM (ONLY ONCE)
   useEffect(() => {
-    if (!user) return;
+    if (!user || joined) return;
 
     async function setup() {
       const keyPair = await crypto.subtle.generateKey(
@@ -75,12 +78,14 @@ function App() {
         userId: user,
         publicKey: Array.from(new Uint8Array(publicKey)),
       });
+
+      setJoined(true); // 🔥 prevents duplicates
     }
 
     setup();
-  }, [user]);
+  }, [user, joined]);
 
-  // SHARED KEY
+  // 🔐 SHARED KEY
   useEffect(() => {
     const handler = async (keys: any) => {
       if (!privateKey || !user) return;
@@ -112,7 +117,7 @@ function App() {
     return () => socket.off("publicKeys", handler);
   }, [privateKey, user]);
 
-  // RECEIVE (single listener)
+  // 📥 RECEIVE (single listener)
   useEffect(() => {
     if (!sharedKey) return;
 
@@ -143,7 +148,7 @@ function App() {
     return () => socket.off("messages", handler);
   }, [sharedKey]);
 
-  // SEND
+  // 📤 SEND (no local add)
   async function sendMessage() {
     if (!sharedKey || !input || !user) return;
 
@@ -166,14 +171,26 @@ function App() {
     setInput("");
   }
 
+  // UI
   return (
     <div style={{ padding: 20 }}>
       {!user ? (
         <>
           <h2>Login</h2>
-          <input onChange={(e) => setUsername(e.target.value)} />
-          <input type="password" onChange={(e) => setPassword(e.target.value)} />
+
+          <input
+            placeholder="Username"
+            onChange={(e) => setUsername(e.target.value)}
+          />
+
+          <input
+            placeholder="Password"
+            type="password"
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
           <br /><br />
+
           <button onClick={login}>Login</button>
           <button onClick={register}>Register</button>
         </>
@@ -183,11 +200,17 @@ function App() {
 
           {messages.map((m, i) => (
             <div key={i}>
-              {m.sender}: {m.text}
+              <b>{m.sender}:</b> {m.text}
             </div>
           ))}
 
-          <input value={input} onChange={(e) => setInput(e.target.value)} />
+          <br />
+
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+          />
+
           <button onClick={sendMessage}>Send</button>
         </>
       )}
