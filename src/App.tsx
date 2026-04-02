@@ -17,62 +17,48 @@ function App() {
   const [privateKey, setPrivateKey] = useState<CryptoKey | null>(null);
   const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
 
-  // 🔌 INIT SOCKET (FIX)
+  // 🔌 SOCKET
   useEffect(() => {
     const s = io(BACKEND_URL);
     setSocket(s);
-
-    return () => {
-      s.disconnect();
-    };
+    return () => s.disconnect();
   }, []);
 
   // 🔐 LOGIN
   async function login() {
-    try {
-      const res = await fetch(`${BACKEND_URL}/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ username, password }),
-      });
+    const res = await fetch(`${BACKEND_URL}/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, password }),
+    });
 
-      const data = await res.json();
-      console.log("LOGIN RESPONSE:", data);
+    const data = await res.json();
 
-      if (data.success) {
-        setUser(data.username);
-      } else {
-        alert(data.error);
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Login failed");
+    if (data.success) {
+      setUser(data.username);
+    } else {
+      alert(data.error);
     }
   }
 
   // 🔐 REGISTER
   async function register() {
-    try {
-      const res = await fetch(`${BACKEND_URL}/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ username, password }),
-      });
+    const res = await fetch(`${BACKEND_URL}/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, password }),
+    });
 
-      const data = await res.json();
+    const data = await res.json();
 
-      if (data.success) {
-        alert("Registered! Now login.");
-      } else {
-        alert(data.error);
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Register failed");
+    if (data.success) {
+      alert("Registered! Now login.");
+    } else {
+      alert(data.error);
     }
   }
 
@@ -154,10 +140,19 @@ function App() {
             new Uint8Array(m.data)
           );
 
-          newMessages.push({
-            sender: m.sender,
-            text: new TextDecoder().decode(decrypted),
-          });
+          const text = new TextDecoder().decode(decrypted);
+
+          if (text.startsWith("data:image")) {
+            newMessages.push({
+              sender: m.sender,
+              image: text,
+            });
+          } else {
+            newMessages.push({
+              sender: m.sender,
+              text,
+            });
+          }
         } catch {}
       }
 
@@ -167,7 +162,7 @@ function App() {
     return () => socket.off("messages");
   }, [socket, sharedKey]);
 
-  // 📤 SEND
+  // 📤 SEND TEXT
   async function sendMessage() {
     if (!sharedKey || !input || !user || !socket) return;
 
@@ -188,6 +183,38 @@ function App() {
     });
 
     setInput("");
+  }
+
+  // 🖼 SEND IMAGE
+  async function handleImage(e: any) {
+    if (!sharedKey || !socket || !user) return;
+
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+
+      const data = new TextEncoder().encode(base64);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+
+      const encrypted = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv },
+        sharedKey,
+        data
+      );
+
+      socket.emit("sendMessage", {
+        roomId,
+        sender: user,
+        data: Array.from(new Uint8Array(encrypted)),
+        iv: Array.from(iv),
+      });
+    };
+
+    reader.readAsDataURL(file);
   }
 
   // UI
@@ -217,44 +244,59 @@ function App() {
         <>
           <h2>🔐 {user} in {roomId}</h2>
 
-<div style={{ marginBottom: 20 }}>
-  {messages.map((m, i) => {
-    const isMe = m.sender === user;
+          {/* 📎 IMAGE UPLOAD */}
+          <input type="file" accept="image/*" onChange={handleImage} />
 
-    return (
-      <div
-        key={i}
-        style={{
-          display: "flex",
-          justifyContent: isMe ? "flex-end" : "flex-start",
-          marginBottom: 8,
-        }}
-      >
-        <div
-          style={{
-            background: isMe ? "#007bff" : "#e5e5ea",
-            color: isMe ? "white" : "black",
-            padding: "10px 14px",
-            borderRadius: 16,
-            maxWidth: "60%",
-            fontSize: 14,
-          }}
-        >
-          {!isMe && (
-            <div style={{ fontSize: 10, opacity: 0.6 }}>
-              {m.sender}
-            </div>
-          )}
-          {m.text}
-        </div>
-      </div>
-    );
-  })}
-</div>
+          <div style={{ marginBottom: 20 }}>
+            {messages.map((m, i) => {
+              const isMe = m.sender === user;
+
+              return (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    justifyContent: isMe ? "flex-end" : "flex-start",
+                    marginBottom: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      background: isMe ? "#007bff" : "#e5e5ea",
+                      color: isMe ? "white" : "black",
+                      padding: 10,
+                      borderRadius: 16,
+                      maxWidth: "60%",
+                    }}
+                  >
+                    {!isMe && (
+                      <div style={{ fontSize: 10, opacity: 0.6 }}>
+                        {m.sender}
+                      </div>
+                    )}
+
+                    {m.text && <div>{m.text}</div>}
+
+                    {m.image && (
+                      <img
+                        src={m.image}
+                        style={{
+                          maxWidth: "100%",
+                          borderRadius: 10,
+                          marginTop: 5,
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            placeholder="Message..."
           />
 
           <button onClick={sendMessage}>Send</button>
