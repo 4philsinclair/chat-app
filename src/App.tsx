@@ -41,6 +41,7 @@ function App() {
 
     if (data.success) {
       setUser(data.username);
+      setMessages([]); // reset chat on login
     } else {
       alert(data.error);
     }
@@ -126,7 +127,7 @@ function App() {
     return () => socket.off("publicKeys", handler);
   }, [socket, privateKey, user]);
 
-  // 📥 RECEIVE MESSAGES (FIXED)
+  // 📥 RECEIVE MESSAGES (single listener, no duplicates)
   useEffect(() => {
     if (!socket || !sharedKey) return;
 
@@ -154,21 +155,20 @@ function App() {
         }
       }
 
+      // append only (no overwrite, no duplicates from local)
       setMessages((prev) => [...prev, ...newMessages]);
     };
 
     socket.on("messages", handler);
 
     return () => {
-      socket.off("messages", handler); // 🔥 CRITICAL FIX
+      socket.off("messages", handler); // 🔥 critical
     };
   }, [socket, sharedKey]);
 
-  // 📤 SEND MESSAGE
+  // 📤 SEND MESSAGE (NO local add!)
   async function sendMessage() {
     if (!sharedKey || !input || !user || !socket) return;
-
-    console.log("📤 sending message");
 
     const data = new TextEncoder().encode(input);
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -186,7 +186,7 @@ function App() {
       iv: Array.from(iv),
     });
 
-    setInput("");
+    setInput(""); // ONLY this
   }
 
   // UI
