@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
-import { io, Socket } from "socket.io-client";
+import { io } from "socket.io-client";
 
 const BACKEND_URL = "https://chat-app-tks0.onrender.com";
 
+// 🔥 SINGLE SOCKET INSTANCE (FIX)
+const socket = io(BACKEND_URL, {
+  transports: ["polling", "websocket"],
+});
+
 function App() {
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [user, setUser] = useState<string | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -16,20 +20,7 @@ function App() {
 
   const roomId = "room1";
 
-  // 🔌 SOCKET INIT (mobile-safe)
-  useEffect(() => {
-    const s = io(BACKEND_URL, {
-      transports: ["polling", "websocket"],
-    });
-
-    setSocket(s);
-
-    return () => {
-      s.disconnect();
-    };
-  }, []);
-
-  // 🔐 LOGIN
+  // LOGIN
   async function login() {
     const res = await fetch(`${BACKEND_URL}/login`, {
       method: "POST",
@@ -41,13 +32,13 @@ function App() {
 
     if (data.success) {
       setUser(data.username);
-      setMessages([]); // reset chat on login
+      setMessages([]);
     } else {
       alert(data.error);
     }
   }
 
-  // 🔐 REGISTER
+  // REGISTER
   async function register() {
     const res = await fetch(`${BACKEND_URL}/register`, {
       method: "POST",
@@ -57,16 +48,13 @@ function App() {
 
     const data = await res.json();
 
-    if (data.success) {
-      alert("Registered!");
-    } else {
-      alert(data.error);
-    }
+    if (data.success) alert("Registered!");
+    else alert(data.error);
   }
 
-  // 🔑 KEY SETUP
+  // KEY SETUP
   useEffect(() => {
-    if (!user || !socket) return;
+    if (!user) return;
 
     async function setup() {
       const keyPair = await crypto.subtle.generateKey(
@@ -90,12 +78,10 @@ function App() {
     }
 
     setup();
-  }, [user, socket]);
+  }, [user]);
 
-  // 🔐 SHARED KEY
+  // SHARED KEY
   useEffect(() => {
-    if (!socket) return;
-
     const handler = async (keys: any) => {
       if (!privateKey || !user) return;
 
@@ -123,17 +109,14 @@ function App() {
     };
 
     socket.on("publicKeys", handler);
-
     return () => socket.off("publicKeys", handler);
-  }, [socket, privateKey, user]);
+  }, [privateKey, user]);
 
-  // 📥 RECEIVE MESSAGES (single listener, no duplicates)
+  // RECEIVE (single listener)
   useEffect(() => {
-    if (!socket || !sharedKey) return;
+    if (!sharedKey) return;
 
     const handler = async (msgs: any[]) => {
-      console.log("📥 received:", msgs);
-
       const newMessages = [];
 
       for (let m of msgs) {
@@ -150,25 +133,19 @@ function App() {
             sender: m.sender,
             text,
           });
-        } catch (e) {
-          console.log("❌ decrypt failed", e);
-        }
+        } catch {}
       }
 
-      // append only (no overwrite, no duplicates from local)
       setMessages((prev) => [...prev, ...newMessages]);
     };
 
     socket.on("messages", handler);
+    return () => socket.off("messages", handler);
+  }, [sharedKey]);
 
-    return () => {
-      socket.off("messages", handler); // 🔥 critical
-    };
-  }, [socket, sharedKey]);
-
-  // 📤 SEND MESSAGE (NO local add!)
+  // SEND
   async function sendMessage() {
-    if (!sharedKey || !input || !user || !socket) return;
+    if (!sharedKey || !input || !user) return;
 
     const data = new TextEncoder().encode(input);
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -186,29 +163,17 @@ function App() {
       iv: Array.from(iv),
     });
 
-    setInput(""); // ONLY this
+    setInput("");
   }
 
-  // UI
   return (
     <div style={{ padding: 20 }}>
       {!user ? (
         <>
           <h2>Login</h2>
-
-          <input
-            placeholder="Username"
-            onChange={(e) => setUsername(e.target.value)}
-          />
-
-          <input
-            placeholder="Password"
-            type="password"
-            onChange={(e) => setPassword(e.target.value)}
-          />
-
+          <input onChange={(e) => setUsername(e.target.value)} />
+          <input type="password" onChange={(e) => setPassword(e.target.value)} />
           <br /><br />
-
           <button onClick={login}>Login</button>
           <button onClick={register}>Register</button>
         </>
@@ -216,21 +181,13 @@ function App() {
         <>
           <h3>{user}</h3>
 
-          <div>
-            {messages.map((m, i) => (
-              <div key={i}>
-                <b>{m.sender}:</b> {m.text}
-              </div>
-            ))}
-          </div>
+          {messages.map((m, i) => (
+            <div key={i}>
+              {m.sender}: {m.text}
+            </div>
+          ))}
 
-          <br />
-
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-          />
-
+          <input value={input} onChange={(e) => setInput(e.target.value)} />
           <button onClick={sendMessage}>Send</button>
         </>
       )}
