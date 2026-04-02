@@ -217,7 +217,11 @@ function App() {
   async function startCall() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    const pc = new RTCPeerConnection();
+    const pc = new RTCPeerConnection({
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" }
+  ]
+});
 
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
@@ -225,6 +229,7 @@ function App() {
       const audio = new Audio();
       audio.srcObject = event.streams[0];
       audio.play();
+	console.log("🔊 Received audio stream");
     };
 
     pc.onicecandidate = (e) => {
@@ -246,7 +251,11 @@ function App() {
     socket.on("call-offer", async (offer) => {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      const pc = new RTCPeerConnection();
+    const pc = new RTCPeerConnection({
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" }
+  ]
+});
 
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
