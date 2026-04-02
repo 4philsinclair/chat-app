@@ -3,7 +3,7 @@ import { io } from "socket.io-client";
 
 const BACKEND_URL = "https://chat-app-tks0.onrender.com";
 
-// 🔥 SINGLE SOCKET (fix duplicates)
+// 🔥 SINGLE SOCKET INSTANCE
 const socket = io(BACKEND_URL, {
   transports: ["polling", "websocket"],
 });
@@ -35,7 +35,7 @@ function App() {
     if (data.success) {
       setUser(data.username);
       setMessages([]);
-      setJoined(false); // 🔥 reset join state
+      setJoined(false);
     } else {
       alert(data.error);
     }
@@ -55,7 +55,7 @@ function App() {
     else alert(data.error);
   }
 
-  // 🔑 JOIN ROOM (ONLY ONCE)
+  // 🔑 JOIN ROOM (only once)
   useEffect(() => {
     if (!user || joined) return;
 
@@ -79,7 +79,7 @@ function App() {
         publicKey: Array.from(new Uint8Array(publicKey)),
       });
 
-      setJoined(true); // 🔥 prevents duplicates
+      setJoined(true);
     }
 
     setup();
@@ -117,9 +117,11 @@ function App() {
     return () => socket.off("publicKeys", handler);
   }, [privateKey, user]);
 
-  // 📥 RECEIVE (single listener)
+  // 📥 RECEIVE (history-safe + no duplicates)
   useEffect(() => {
     if (!sharedKey) return;
+
+    let isFirstLoad = true;
 
     const handler = async (msgs: any[]) => {
       const newMessages = [];
@@ -141,14 +143,31 @@ function App() {
         } catch {}
       }
 
-      setMessages((prev) => [...prev, ...newMessages]);
+      if (isFirstLoad) {
+        // ✅ initial history load
+        setMessages(newMessages);
+        isFirstLoad = false;
+      } else {
+        // ✅ append only new messages
+        setMessages((prev) => {
+          const combined = [...prev, ...newMessages];
+
+          // 🔥 dedupe safeguard
+          return combined.filter(
+            (v, i, a) =>
+              i === a.findIndex(
+                (t) => t.sender === v.sender && t.text === v.text
+              )
+          );
+        });
+      }
     };
 
     socket.on("messages", handler);
     return () => socket.off("messages", handler);
   }, [sharedKey]);
 
-  // 📤 SEND (no local add)
+  // 📤 SEND
   async function sendMessage() {
     if (!sharedKey || !input || !user) return;
 
