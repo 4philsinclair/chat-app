@@ -1,67 +1,57 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
 const BACKEND_URL = "https://chat-app-tks0.onrender.com";
 
-function getAvatar(name: string) {
-  const colors = ["#f44336", "#2196f3", "#4caf50", "#ff9800", "#9c27b0"];
-  const color = colors[name.charCodeAt(0) % colors.length];
-  return { letter: name[0].toUpperCase(), color };
-}
-
 function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [peer, setPeer] = useState<RTCPeerConnection | null>(null);
-
   const [user, setUser] = useState<string | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
 
   const [privateKey, setPrivateKey] = useState<CryptoKey | null>(null);
   const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const roomId = "room1";
 
-  // 🔌 SOCKET (FIXED FOR MOBILE)
+  // SOCKET (mobile-safe)
   useEffect(() => {
     const s = io(BACKEND_URL, {
-  transports: ["polling", "websocket"], // 👈 order matters!
-  reconnection: true,
-  reconnectionAttempts: Infinity,
-  reconnectionDelay: 1000,
-});
+      transports: ["polling", "websocket"],
+    });
     setSocket(s);
     return () => s.disconnect();
   }, []);
 
-  // 🔐 LOGIN
+  // LOGIN
   async function login() {
     const res = await fetch(`${BACKEND_URL}/login`, {
       method: "POST",
-      headers: {"Content-Type":"application/json"},
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
     });
+
     const data = await res.json();
     if (data.success) setUser(data.username);
     else alert(data.error);
   }
 
-  // 🔐 REGISTER
+  // REGISTER
   async function register() {
     const res = await fetch(`${BACKEND_URL}/register`, {
       method: "POST",
-      headers: {"Content-Type":"application/json"},
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
     });
+
     const data = await res.json();
     if (data.success) alert("Registered!");
     else alert(data.error);
   }
 
-  // 🔑 KEY SETUP
+  // KEY SETUP
   useEffect(() => {
     if (!user || !socket) return;
 
@@ -77,7 +67,7 @@ function App() {
       const publicKey = await crypto.subtle.exportKey("raw", keyPair.publicKey);
 
       socket.emit("joinRoom", {
-        roomId: "room1",
+        roomId,
         userId: user,
         publicKey: Array.from(new Uint8Array(publicKey)),
       });
@@ -86,7 +76,7 @@ function App() {
     setup();
   }, [user, socket]);
 
-  // 🔐 SHARED KEY
+  // SHARED KEY
   useEffect(() => {
     if (!socket) return;
 
@@ -119,7 +109,7 @@ function App() {
     return () => socket.off("publicKeys");
   }, [socket, privateKey, user]);
 
-  // 📥 RECEIVE
+  // RECEIVE
   useEffect(() => {
     if (!socket) return;
 
@@ -138,21 +128,22 @@ function App() {
 
           const text = new TextDecoder().decode(decrypted);
 
-          if (text.startsWith("data:image")) {
-            newMessages.push({ sender: m.sender, image: text });
-          } else {
-            newMessages.push({ sender: m.sender, text });
-          }
-        } catch {}
+          newMessages.push({
+            sender: m.sender,
+            text,
+          });
+        } catch (e) {
+          console.log("decrypt error", e);
+        }
       }
 
-      setMessages(newMessages);
+      setMessages((prev) => [...prev, ...newMessages]);
     });
 
     return () => socket.off("messages");
   }, [socket, sharedKey]);
 
-  // 📤 SEND
+  // SEND
   async function sendMessage() {
     if (!sharedKey || !input || !user || !socket) return;
 
@@ -166,7 +157,7 @@ function App() {
     );
 
     socket.emit("sendMessage", {
-      roomId: "room1",
+      roomId,
       sender: user,
       data: Array.from(new Uint8Array(encrypted)),
       iv: Array.from(iv),
@@ -175,87 +166,31 @@ function App() {
     setInput("");
   }
 
-  // 📞 CALL (STUN + TURN placeholder)
-  async function startCall() {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        // 👉 add TURN here later if needed
-      ],
-    });
-
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-    pc.ontrack = (event) => {
-      const audio = document.createElement("audio");
-      audio.srcObject = event.streams[0];
-      audio.autoplay = true;
-      audio.controls = true;
-      document.body.appendChild(audio);
-    };
-
-    pc.onicecandidate = (e) => {
-      if (e.candidate) socket?.emit("call-candidate", e.candidate);
-    };
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    socket?.emit("call-offer", offer);
-    setPeer(pc);
-  }
-
-  // RECEIVE CALL
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on("call-offer", async (offer) => {
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
-
-      await pc.setRemoteDescription(offer);
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      socket.emit("call-answer", answer);
-      setPeer(pc);
-    });
-
-    socket.on("call-answer", async (answer) => {
-      await peer?.setRemoteDescription(answer);
-    });
-
-    socket.on("call-candidate", async (c) => {
-      await peer?.addIceCandidate(c);
-    });
-
-  }, [socket, peer]);
-
-  // UI
   return (
     <div style={{ padding: 20 }}>
       {!user ? (
         <>
           <h2>Login</h2>
-          <input placeholder="Username" onChange={(e)=>setUsername(e.target.value)} />
-          <input placeholder="Password" type="password" onChange={(e)=>setPassword(e.target.value)} />
-          <br/><br/>
+          <input onChange={(e) => setUsername(e.target.value)} />
+          <input type="password" onChange={(e) => setPassword(e.target.value)} />
+          <br /><br />
           <button onClick={login}>Login</button>
           <button onClick={register}>Register</button>
         </>
       ) : (
         <>
-          <h3>{user} <button onClick={startCall}>📞</button></h3>
+          <h3>{user}</h3>
 
-          {messages.map((m,i)=>(
-            <div key={i}>{m.text}</div>
+          {messages.map((m, i) => (
+            <div key={i}>
+              {m.sender}: {m.text}
+            </div>
           ))}
 
-          <input value={input} onChange={(e)=>setInput(e.target.value)} />
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+          />
           <button onClick={sendMessage}>Send</button>
         </>
       )}
