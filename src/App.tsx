@@ -25,9 +25,11 @@ function App() {
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // 🔌 SOCKET
+  // 🔌 SOCKET (FIXED FOR MOBILE)
   useEffect(() => {
-    const s = io(BACKEND_URL, { transports: ["websocket"] });
+    const s = io(BACKEND_URL, {
+      transports: ["websocket", "polling"],
+    });
     setSocket(s);
     return () => s.disconnect();
   }, []);
@@ -36,10 +38,9 @@ function App() {
   async function login() {
     const res = await fetch(`${BACKEND_URL}/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ username, password }),
     });
-
     const data = await res.json();
     if (data.success) setUser(data.username);
     else alert(data.error);
@@ -49,10 +50,9 @@ function App() {
   async function register() {
     const res = await fetch(`${BACKEND_URL}/register`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ username, password }),
     });
-
     const data = await res.json();
     if (data.success) alert("Registered!");
     else alert(data.error);
@@ -149,7 +149,7 @@ function App() {
     return () => socket.off("messages");
   }, [socket, sharedKey]);
 
-  // 📤 SEND TEXT
+  // 📤 SEND
   async function sendMessage() {
     if (!sharedKey || !input || !user || !socket) return;
 
@@ -172,52 +172,18 @@ function App() {
     setInput("");
   }
 
-  // 🖼 IMAGE
-  async function handleImage(e: any) {
-    if (!sharedKey || !socket || !user) return;
-
-    const file = e.target.files[0];
-    const reader = new FileReader();
-
-    reader.onload = async () => {
-      const base64 = reader.result as string;
-
-      const data = new TextEncoder().encode(base64);
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-
-      const encrypted = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        sharedKey,
-        data
-      );
-
-      socket.emit("sendMessage", {
-        roomId: "room1",
-        sender: user,
-        data: Array.from(new Uint8Array(encrypted)),
-        iv: Array.from(iv),
-      });
-    };
-
-    reader.readAsDataURL(file);
-  }
-
-  // 📞 CALL (FIXED)
+  // 📞 CALL (STUN + TURN placeholder)
   async function startCall() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        // 👉 add TURN here later if needed
+      ],
     });
 
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-    // local mute
-    const localAudio = document.createElement("audio");
-    localAudio.srcObject = stream;
-    localAudio.muted = true;
-    localAudio.autoplay = true;
-    document.body.appendChild(localAudio);
 
     pc.ontrack = (event) => {
       const audio = document.createElement("audio");
@@ -243,21 +209,9 @@ function App() {
     if (!socket) return;
 
     socket.on("call-offer", async (offer) => {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
-
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-      pc.ontrack = (event) => {
-        const audio = document.createElement("audio");
-        audio.srcObject = event.streams[0];
-        audio.autoplay = true;
-        audio.controls = true;
-        document.body.appendChild(audio);
-      };
 
       await pc.setRemoteDescription(offer);
 
@@ -276,77 +230,30 @@ function App() {
       await peer?.addIceCandidate(c);
     });
 
-    return () => {
-      socket.off("call-offer");
-      socket.off("call-answer");
-      socket.off("call-candidate");
-    };
   }, [socket, peer]);
-
-  // AUTO SCROLL
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView();
-  }, [messages]);
 
   // UI
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+    <div style={{ padding: 20 }}>
       {!user ? (
-        <div style={{ padding: 20 }}>
+        <>
           <h2>Login</h2>
-          <input placeholder="Username" onChange={(e) => setUsername(e.target.value)} />
-          <input placeholder="Password" type="password" onChange={(e) => setPassword(e.target.value)} />
-          <br /><br />
+          <input placeholder="Username" onChange={(e)=>setUsername(e.target.value)} />
+          <input placeholder="Password" type="password" onChange={(e)=>setPassword(e.target.value)} />
+          <br/><br/>
           <button onClick={login}>Login</button>
           <button onClick={register}>Register</button>
-        </div>
+        </>
       ) : (
         <>
-          <div style={{ background: "#075e54", color: "white", padding: 10 }}>
-            {user}
-            <button onClick={startCall} style={{ float: "right" }}>📞</button>
-          </div>
+          <h3>{user} <button onClick={startCall}>📞</button></h3>
 
-          <div style={{ flex: 1, overflowY: "auto", padding: 10 }}>
-            {messages.map((m, i) => {
-              const isMe = m.sender === user;
-              const avatar = getAvatar(m.sender);
+          {messages.map((m,i)=>(
+            <div key={i}>{m.text}</div>
+          ))}
 
-              return (
-                <div key={i} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", marginBottom: 10 }}>
-                  {!isMe && (
-                    <div style={{
-                      width: 30, height: 30, borderRadius: "50%",
-                      background: avatar.color, color: "white",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      marginRight: 6
-                    }}>
-                      {avatar.letter}
-                    </div>
-                  )}
-
-                  <div style={{ background: isMe ? "#dcf8c6" : "#fff", padding: 10, borderRadius: 10 }}>
-                    {m.text && <div>{m.text}</div>}
-                    {m.image && <img src={m.image} style={{ maxWidth: "200px" }} />}
-                  </div>
-                </div>
-              );
-            })}
-            <div ref={messagesEndRef} />
-          </div>
-
-          <div style={{ padding: 10 }}>
-            <input type="file" accept="image/*" onChange={handleImage} />
-          </div>
-
-          <div style={{ display: "flex", padding: 10 }}>
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <button onClick={sendMessage}>Send</button>
-          </div>
+          <input value={input} onChange={(e)=>setInput(e.target.value)} />
+          <button onClick={sendMessage}>Send</button>
         </>
       )}
     </div>
