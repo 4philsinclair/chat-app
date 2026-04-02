@@ -3,7 +3,7 @@ import { io } from "socket.io-client";
 
 const BACKEND_URL = "https://chat-app-tks0.onrender.com";
 
-// 🔥 SINGLE SOCKET
+// 🔥 SINGLE SOCKET INSTANCE
 const socket = io(BACKEND_URL, {
   transports: ["polling", "websocket"],
 });
@@ -17,11 +17,12 @@ function App() {
 
   const [privateKey, setPrivateKey] = useState<CryptoKey | null>(null);
   const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
+
   const [joined, setJoined] = useState(false);
 
   const roomId = "room1";
 
-  // LOGIN
+  // 🔐 LOGIN
   async function login() {
     const res = await fetch(`${BACKEND_URL}/login`, {
       method: "POST",
@@ -40,7 +41,7 @@ function App() {
     }
   }
 
-  // REGISTER
+  // 🔐 REGISTER
   async function register() {
     const res = await fetch(`${BACKEND_URL}/register`, {
       method: "POST",
@@ -54,7 +55,7 @@ function App() {
     else alert(data.error);
   }
 
-  // JOIN ROOM
+  // 🔑 JOIN ROOM (only once)
   useEffect(() => {
     if (!user || joined) return;
 
@@ -84,7 +85,7 @@ function App() {
     setup();
   }, [user, joined]);
 
-  // SHARED KEY
+  // 🔐 SHARED KEY
   useEffect(() => {
     const handler = async (keys: any) => {
       if (!privateKey || !user) return;
@@ -116,7 +117,7 @@ function App() {
     return () => socket.off("publicKeys", handler);
   }, [privateKey, user]);
 
-  // RECEIVE (text + image)
+  // 📥 RECEIVE (history-safe + no duplicates)
   useEffect(() => {
     if (!sharedKey) return;
 
@@ -135,25 +136,30 @@ function App() {
 
           const text = new TextDecoder().decode(decrypted);
 
-          if (text.startsWith("data:image")) {
-            newMessages.push({
-              sender: m.sender,
-              image: text,
-            });
-          } else {
-            newMessages.push({
-              sender: m.sender,
-              text,
-            });
-          }
+          newMessages.push({
+            sender: m.sender,
+            text,
+          });
         } catch {}
       }
 
       if (isFirstLoad) {
+        // ✅ initial history load
         setMessages(newMessages);
         isFirstLoad = false;
       } else {
-        setMessages((prev) => [...prev, ...newMessages]);
+        // ✅ append only new messages
+        setMessages((prev) => {
+          const combined = [...prev, ...newMessages];
+
+          // 🔥 dedupe safeguard
+          return combined.filter(
+            (v, i, a) =>
+              i === a.findIndex(
+                (t) => t.sender === v.sender && t.text === v.text
+              )
+          );
+        });
       }
     };
 
@@ -161,7 +167,7 @@ function App() {
     return () => socket.off("messages", handler);
   }, [sharedKey]);
 
-  // SEND TEXT
+  // 📤 SEND
   async function sendMessage() {
     if (!sharedKey || !input || !user) return;
 
@@ -184,47 +190,26 @@ function App() {
     setInput("");
   }
 
-  // SEND IMAGE
-  async function sendImage(e: any) {
-    if (!sharedKey || !user) return;
-
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = async () => {
-      const base64 = reader.result as string;
-
-      const data = new TextEncoder().encode(base64);
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-
-      const encrypted = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        sharedKey,
-        data
-      );
-
-      socket.emit("sendMessage", {
-        roomId,
-        sender: user,
-        data: Array.from(new Uint8Array(encrypted)),
-        iv: Array.from(iv),
-      });
-    };
-
-    reader.readAsDataURL(file);
-  }
-
   // UI
   return (
     <div style={{ padding: 20 }}>
       {!user ? (
         <>
           <h2>Login</h2>
-          <input onChange={(e) => setUsername(e.target.value)} />
-          <input type="password" onChange={(e) => setPassword(e.target.value)} />
+
+          <input
+            placeholder="Username"
+            onChange={(e) => setUsername(e.target.value)}
+          />
+
+          <input
+            placeholder="Password"
+            type="password"
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
           <br /><br />
+
           <button onClick={login}>Login</button>
           <button onClick={register}>Register</button>
         </>
@@ -233,15 +218,8 @@ function App() {
           <h3>{user}</h3>
 
           {messages.map((m, i) => (
-            <div key={i} style={{ marginBottom: 10 }}>
-              <b>{m.sender}:</b>
-              {m.text && <div>{m.text}</div>}
-              {m.image && (
-                <img
-                  src={m.image}
-                  style={{ maxWidth: "200px", display: "block" }}
-                />
-              )}
+            <div key={i}>
+              <b>{m.sender}:</b> {m.text}
             </div>
           ))}
 
@@ -251,11 +229,8 @@ function App() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
           />
+
           <button onClick={sendMessage}>Send</button>
-
-          <br /><br />
-
-          <input type="file" accept="image/*" onChange={sendImage} />
         </>
       )}
     </div>
