@@ -11,7 +11,7 @@ function getAvatar(name: string) {
 
 function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [peer, setPeer] = useState<RTCPeerConnection | null>(null);
+  const [peer, setPeer] = useState<any>(null);
 
   const [user, setUser] = useState<string | null>(null);
   const [username, setUsername] = useState("");
@@ -218,29 +218,18 @@ function App() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" }
+  ]
+});
 
-    // add tracks
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-    // 🔇 local mute (fix echo)
-    const localAudio = document.createElement("audio");
-    localAudio.srcObject = stream;
-    localAudio.muted = true;
-    localAudio.autoplay = true;
-    document.body.appendChild(localAudio);
-
-    // 🔊 remote audio
     pc.ontrack = (event) => {
-      console.log("🔊 Received audio stream");
-
-      const audio = document.createElement("audio");
+      const audio = new Audio();
       audio.srcObject = event.streams[0];
-      audio.autoplay = true;
-      audio.controls = true;
-
-      document.body.appendChild(audio);
+      audio.play();
+	console.log("🔊 Received audio stream");
     };
 
     pc.onicecandidate = (e) => {
@@ -262,27 +251,18 @@ function App() {
     socket.on("call-offer", async (offer) => {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
+    const pc = new RTCPeerConnection({
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" }
+  ]
+});
 
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-      const localAudio = document.createElement("audio");
-      localAudio.srcObject = stream;
-      localAudio.muted = true;
-      localAudio.autoplay = true;
-      document.body.appendChild(localAudio);
-
       pc.ontrack = (event) => {
-        console.log("🔊 Received audio stream");
-
-        const audio = document.createElement("audio");
+        const audio = new Audio();
         audio.srcObject = event.streams[0];
-        audio.autoplay = true;
-        audio.controls = true;
-
-        document.body.appendChild(audio);
+        audio.play();
       };
 
       await pc.setRemoteDescription(offer);
@@ -331,7 +311,7 @@ function App() {
         ) : (
           <>
             <div style={{ background: "#075e54", color: "white", padding: 10 }}>
-              🔐 {user}
+              🔐 {user} — {roomId}
               <button onClick={startCall} style={{ float: "right" }}>📞</button>
             </div>
 
@@ -364,17 +344,12 @@ function App() {
               <div ref={messagesEndRef} />
             </div>
 
-            <div style={{ padding: 10 }}>
+            <div style={{ display: "flex", padding: 10 }}>
               <input type="file" accept="image/*" onChange={handleImage} />
             </div>
 
             <div style={{ display: "flex", padding: 10 }}>
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                style={{ flex: 1 }}
-                onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-              />
+              <input value={input} onChange={(e) => setInput(e.target.value)} style={{ flex: 1 }} />
               <button onClick={sendMessage}>Send</button>
             </div>
           </>
