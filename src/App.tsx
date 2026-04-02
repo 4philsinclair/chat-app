@@ -21,7 +21,7 @@ function App() {
 
   const roomId = "room1";
 
-  // LOGIN
+  // 🔐 LOGIN
   async function login() {
     const res = await fetch(`${BACKEND_URL}/login`, {
       method: "POST",
@@ -40,7 +40,7 @@ function App() {
     }
   }
 
-  // REGISTER
+  // 🔐 REGISTER
   async function register() {
     const res = await fetch(`${BACKEND_URL}/register`, {
       method: "POST",
@@ -54,7 +54,7 @@ function App() {
     else alert(data.error);
   }
 
-  // JOIN ROOM
+  // 🔑 JOIN ROOM
   useEffect(() => {
     if (!user || joined) return;
 
@@ -84,7 +84,7 @@ function App() {
     setup();
   }, [user, joined]);
 
-  // SHARED KEY
+  // 🔐 SHARED KEY
   useEffect(() => {
     const handler = async (keys: any) => {
       if (!privateKey || !user) return;
@@ -116,7 +116,7 @@ function App() {
     return () => socket.off("publicKeys", handler);
   }, [privateKey, user]);
 
-  // RECEIVE (text + image)
+  // 📥 RECEIVE (text + images)
   useEffect(() => {
     if (!sharedKey) return;
 
@@ -146,7 +146,9 @@ function App() {
               text,
             });
           }
-        } catch {}
+        } catch (e) {
+          console.log("❌ decrypt failed", e);
+        }
       }
 
       if (isFirstLoad) {
@@ -161,7 +163,7 @@ function App() {
     return () => socket.off("messages", handler);
   }, [sharedKey]);
 
-  // SEND TEXT
+  // 📤 SEND TEXT
   async function sendMessage() {
     if (!sharedKey || !input || !user) return;
 
@@ -184,36 +186,56 @@ function App() {
     setInput("");
   }
 
-  // SEND IMAGE
-  async function sendImage(e: any) {
+  // 🖼 SEND IMAGE (FIXED)
+  async function sendImage(e: React.ChangeEvent<HTMLInputElement>) {
     if (!sharedKey || !user) return;
 
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files?.[0];
+    if (!file) {
+      console.log("❌ No file selected");
+      return;
+    }
+
+    console.log("📷 file selected:", file.name);
 
     const reader = new FileReader();
 
     reader.onload = async () => {
-      const base64 = reader.result as string;
+      try {
+        const base64 = reader.result as string;
 
-      const data = new TextEncoder().encode(base64);
-      const iv = crypto.getRandomValues(new Uint8Array(12));
+        console.log("📦 base64 ready");
 
-      const encrypted = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        sharedKey,
-        data
-      );
+        const data = new TextEncoder().encode(base64);
+        const iv = crypto.getRandomValues(new Uint8Array(12));
 
-      socket.emit("sendMessage", {
-        roomId,
-        sender: user,
-        data: Array.from(new Uint8Array(encrypted)),
-        iv: Array.from(iv),
-      });
+        const encrypted = await crypto.subtle.encrypt(
+          { name: "AES-GCM", iv },
+          sharedKey,
+          data
+        );
+
+        socket.emit("sendMessage", {
+          roomId,
+          sender: user,
+          data: Array.from(new Uint8Array(encrypted)),
+          iv: Array.from(iv),
+        });
+
+        console.log("✅ image sent");
+      } catch (err) {
+        console.error("❌ image send failed", err);
+      }
+    };
+
+    reader.onerror = () => {
+      console.error("❌ file read error");
     };
 
     reader.readAsDataURL(file);
+
+    // 🔥 CRITICAL for Samsung
+    e.target.value = "";
   }
 
   // UI
@@ -222,9 +244,20 @@ function App() {
       {!user ? (
         <>
           <h2>Login</h2>
-          <input onChange={(e) => setUsername(e.target.value)} />
-          <input type="password" onChange={(e) => setPassword(e.target.value)} />
+
+          <input
+            placeholder="Username"
+            onChange={(e) => setUsername(e.target.value)}
+          />
+
+          <input
+            placeholder="Password"
+            type="password"
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
           <br /><br />
+
           <button onClick={login}>Login</button>
           <button onClick={register}>Register</button>
         </>
@@ -235,7 +268,9 @@ function App() {
           {messages.map((m, i) => (
             <div key={i} style={{ marginBottom: 10 }}>
               <b>{m.sender}:</b>
+
               {m.text && <div>{m.text}</div>}
+
               {m.image && (
                 <img
                   src={m.image}
@@ -255,7 +290,11 @@ function App() {
 
           <br /><br />
 
-          <input type="file" accept="image/*" onChange={sendImage} />
+          <input
+            type="file"
+            accept="image/*"
+            onChange={sendImage}
+          />
         </>
       )}
     </div>
