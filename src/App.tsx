@@ -3,8 +3,15 @@ import { io, Socket } from "socket.io-client";
 
 const BACKEND_URL = "https://chat-app-tks0.onrender.com";
 
+function getAvatar(name: string) {
+  const colors = ["#f44336", "#2196f3", "#4caf50", "#ff9800", "#9c27b0"];
+  const color = colors[name.charCodeAt(0) % colors.length];
+  return { letter: name[0].toUpperCase(), color };
+}
+
 function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [peer, setPeer] = useState<any>(null);
 
   const [user, setUser] = useState<string | null>(null);
   const [username, setUsername] = useState("");
@@ -48,7 +55,7 @@ function App() {
     });
 
     const data = await res.json();
-    if (data.success) alert("Registered! Now login.");
+    if (data.success) alert("Registered!");
     else alert(data.error);
   }
 
@@ -129,11 +136,19 @@ function App() {
 
           const text = new TextDecoder().decode(decrypted);
 
-          newMessages.push({
-            sender: m.sender,
-            text,
-            time: new Date().toLocaleTimeString(),
-          });
+          if (text.startsWith("data:image")) {
+            newMessages.push({
+              sender: m.sender,
+              image: text,
+              time: new Date().toLocaleTimeString(),
+            });
+          } else {
+            newMessages.push({
+              sender: m.sender,
+              text,
+              time: new Date().toLocaleTimeString(),
+            });
+          }
         } catch {}
       }
 
@@ -143,7 +158,7 @@ function App() {
     return () => socket.off("messages");
   }, [socket, sharedKey]);
 
-  // 📤 SEND
+  // 📤 SEND TEXT
   async function sendMessage() {
     if (!sharedKey || !input || !user || !socket) return;
 
@@ -166,6 +181,106 @@ function App() {
     setInput("");
   }
 
+  // 🖼 SEND IMAGE
+  async function handleImage(e: any) {
+    if (!sharedKey || !socket || !user) return;
+
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+
+      const data = new TextEncoder().encode(base64);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+
+      const encrypted = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv },
+        sharedKey,
+        data
+      );
+
+      socket.emit("sendMessage", {
+        roomId,
+        sender: user,
+        data: Array.from(new Uint8Array(encrypted)),
+        iv: Array.from(iv),
+      });
+    };
+
+    reader.readAsDataURL(file);
+  }
+
+  // 📞 START CALL
+  async function startCall() {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    const pc = new RTCPeerConnection();
+
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+    pc.ontrack = (event) => {
+      const audio = new Audio();
+      audio.srcObject = event.streams[0];
+      audio.play();
+    };
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) socket?.emit("call-candidate", e.candidate);
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    socket?.emit("call-offer", offer);
+
+    setPeer(pc);
+  }
+
+  // 📞 RECEIVE CALL
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on("call-offer", async (offer) => {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      const pc = new RTCPeerConnection();
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        const audio = new Audio();
+        audio.srcObject = event.streams[0];
+        audio.play();
+      };
+
+      await pc.setRemoteDescription(offer);
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      socket.emit("call-answer", answer);
+
+      setPeer(pc);
+    });
+
+    socket.on("call-answer", async (answer) => {
+      await peer?.setRemoteDescription(answer);
+    });
+
+    socket.on("call-candidate", async (candidate) => {
+      await peer?.addIceCandidate(candidate);
+    });
+
+    return () => {
+      socket.off("call-offer");
+      socket.off("call-answer");
+      socket.off("call-candidate");
+    };
+  }, [socket, peer]);
+
   // ⬇️ AUTO SCROLL
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -173,127 +288,59 @@ function App() {
 
   // UI
   return (
-    <div
-      style={{
-        height: "100vh",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        background: "#ece5dd",
-      }}
-    >
-      <div
-        style={{
-          width: 400,
-          height: "90vh",
-          background: "white",
-          display: "flex",
-          flexDirection: "column",
-          borderRadius: 10,
-          overflow: "hidden",
-        }}
-      >
+    <div style={{ height: "100vh", display: "flex", justifyContent: "center", background: "#ece5dd" }}>
+      <div style={{ width: 400, height: "90vh", background: "white", display: "flex", flexDirection: "column" }}>
         {!user ? (
           <div style={{ padding: 20 }}>
             <h2>Login</h2>
-
             <input placeholder="Username" onChange={(e) => setUsername(e.target.value)} />
-            <input
-              placeholder="Password"
-              type="password"
-              onChange={(e) => setPassword(e.target.value)}
-            />
-
+            <input placeholder="Password" type="password" onChange={(e) => setPassword(e.target.value)} />
             <br /><br />
-
             <button onClick={login}>Login</button>
             <button onClick={register}>Register</button>
           </div>
         ) : (
           <>
-            {/* HEADER */}
-            <div
-              style={{
-                background: "#075e54",
-                color: "white",
-                padding: 10,
-              }}
-            >
+            <div style={{ background: "#075e54", color: "white", padding: 10 }}>
               🔐 {user} — {roomId}
+              <button onClick={startCall} style={{ float: "right" }}>📞</button>
             </div>
 
-            {/* MESSAGES */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: "auto",
-                padding: 10,
-              }}
-            >
+            <div style={{ flex: 1, overflowY: "auto", padding: 10 }}>
               {messages.map((m, i) => {
                 const isMe = m.sender === user;
+                const avatar = getAvatar(m.sender);
 
                 return (
-                  <div
-                    key={i}
-                    style={{
-                      display: "flex",
-                      justifyContent: isMe ? "flex-end" : "flex-start",
-                      marginBottom: 8,
-                    }}
-                  >
-                    <div
-                      style={{
-                        background: isMe ? "#dcf8c6" : "#fff",
-                        padding: 10,
-                        borderRadius: 10,
-                        maxWidth: "70%",
-                        boxShadow: "0 1px 1px rgba(0,0,0,0.1)",
-                      }}
-                    >
-                      {!isMe && (
-                        <div style={{ fontSize: 10, opacity: 0.6 }}>
-                          {m.sender}
-                        </div>
-                      )}
-
-                      <div>{m.text}</div>
-
-                      <div
-                        style={{
-                          fontSize: 10,
-                          textAlign: "right",
-                          marginTop: 4,
-                          opacity: 0.6,
-                        }}
-                      >
-                        {m.time}
+                  <div key={i} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", marginBottom: 10 }}>
+                    {!isMe && (
+                      <div style={{
+                        width: 30, height: 30, borderRadius: "50%",
+                        background: avatar.color, color: "white",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        marginRight: 6
+                      }}>
+                        {avatar.letter}
                       </div>
+                    )}
+
+                    <div style={{ background: isMe ? "#dcf8c6" : "#fff", padding: 10, borderRadius: 10, maxWidth: "70%" }}>
+                      {m.text && <div>{m.text}</div>}
+                      {m.image && <img src={m.image} style={{ maxWidth: "100%" }} />}
+                      <div style={{ fontSize: 10, textAlign: "right" }}>{m.time}</div>
                     </div>
                   </div>
                 );
               })}
-
               <div ref={messagesEndRef} />
             </div>
 
-            {/* INPUT */}
-            <div
-              style={{
-                display: "flex",
-                padding: 10,
-                borderTop: "1px solid #ddd",
-              }}
-            >
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                style={{ flex: 1, marginRight: 10 }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") sendMessage();
-                }}
-              />
+            <div style={{ display: "flex", padding: 10 }}>
+              <input type="file" accept="image/*" onChange={handleImage} />
+            </div>
 
+            <div style={{ display: "flex", padding: 10 }}>
+              <input value={input} onChange={(e) => setInput(e.target.value)} style={{ flex: 1 }} />
               <button onClick={sendMessage}>Send</button>
             </div>
           </>
