@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
 const BACKEND_URL = "https://chat-app-tks0.onrender.com";
@@ -17,6 +17,8 @@ function App() {
   const [privateKey, setPrivateKey] = useState<CryptoKey | null>(null);
   const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
 
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
   // 🔌 SOCKET
   useEffect(() => {
     const s = io(BACKEND_URL);
@@ -28,38 +30,26 @@ function App() {
   async function login() {
     const res = await fetch(`${BACKEND_URL}/login`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
     });
 
     const data = await res.json();
-
-    if (data.success) {
-      setUser(data.username);
-    } else {
-      alert(data.error);
-    }
+    if (data.success) setUser(data.username);
+    else alert(data.error);
   }
 
   // 🔐 REGISTER
   async function register() {
     const res = await fetch(`${BACKEND_URL}/register`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
     });
 
     const data = await res.json();
-
-    if (data.success) {
-      alert("Registered! Now login.");
-    } else {
-      alert(data.error);
-    }
+    if (data.success) alert("Registered! Now login.");
+    else alert(data.error);
   }
 
   // 🔑 KEY SETUP
@@ -75,10 +65,7 @@ function App() {
 
       setPrivateKey(keyPair.privateKey);
 
-      const publicKey = await crypto.subtle.exportKey(
-        "raw",
-        keyPair.publicKey
-      );
+      const publicKey = await crypto.subtle.exportKey("raw", keyPair.publicKey);
 
       socket.emit("joinRoom", {
         roomId,
@@ -142,17 +129,11 @@ function App() {
 
           const text = new TextDecoder().decode(decrypted);
 
-          if (text.startsWith("data:image")) {
-            newMessages.push({
-              sender: m.sender,
-              image: text,
-            });
-          } else {
-            newMessages.push({
-              sender: m.sender,
-              text,
-            });
-          }
+          newMessages.push({
+            sender: m.sender,
+            text,
+            time: new Date().toLocaleTimeString(),
+          });
         } catch {}
       }
 
@@ -162,7 +143,7 @@ function App() {
     return () => socket.off("messages");
   }, [socket, sharedKey]);
 
-  // 📤 SEND TEXT
+  // 📤 SEND
   async function sendMessage() {
     if (!sharedKey || !input || !user || !socket) return;
 
@@ -185,123 +166,139 @@ function App() {
     setInput("");
   }
 
-  // 🖼 SEND IMAGE
-  async function handleImage(e: any) {
-    if (!sharedKey || !socket || !user) return;
-
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = async () => {
-      const base64 = reader.result as string;
-
-      const data = new TextEncoder().encode(base64);
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-
-      const encrypted = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        sharedKey,
-        data
-      );
-
-      socket.emit("sendMessage", {
-        roomId,
-        sender: user,
-        data: Array.from(new Uint8Array(encrypted)),
-        iv: Array.from(iv),
-      });
-    };
-
-    reader.readAsDataURL(file);
-  }
+  // ⬇️ AUTO SCROLL
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   // UI
   return (
-    <div style={{ padding: 20 }}>
-      {!user ? (
-        <>
-          <h2>Login</h2>
+    <div
+      style={{
+        height: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        background: "#ece5dd",
+      }}
+    >
+      <div
+        style={{
+          width: 400,
+          height: "90vh",
+          background: "white",
+          display: "flex",
+          flexDirection: "column",
+          borderRadius: 10,
+          overflow: "hidden",
+        }}
+      >
+        {!user ? (
+          <div style={{ padding: 20 }}>
+            <h2>Login</h2>
 
-          <input
-            placeholder="Username"
-            onChange={(e) => setUsername(e.target.value)}
-          />
+            <input placeholder="Username" onChange={(e) => setUsername(e.target.value)} />
+            <input
+              placeholder="Password"
+              type="password"
+              onChange={(e) => setPassword(e.target.value)}
+            />
 
-          <input
-            placeholder="Password"
-            type="password"
-            onChange={(e) => setPassword(e.target.value)}
-          />
+            <br /><br />
 
-          <br /><br />
+            <button onClick={login}>Login</button>
+            <button onClick={register}>Register</button>
+          </div>
+        ) : (
+          <>
+            {/* HEADER */}
+            <div
+              style={{
+                background: "#075e54",
+                color: "white",
+                padding: 10,
+              }}
+            >
+              🔐 {user} — {roomId}
+            </div>
 
-          <button onClick={login}>Login</button>
-          <button onClick={register}>Register</button>
-        </>
-      ) : (
-        <>
-          <h2>🔐 {user} in {roomId}</h2>
+            {/* MESSAGES */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: 10,
+              }}
+            >
+              {messages.map((m, i) => {
+                const isMe = m.sender === user;
 
-          {/* 📎 IMAGE UPLOAD */}
-          <input type="file" accept="image/*" onChange={handleImage} />
-
-          <div style={{ marginBottom: 20 }}>
-            {messages.map((m, i) => {
-              const isMe = m.sender === user;
-
-              return (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    justifyContent: isMe ? "flex-end" : "flex-start",
-                    marginBottom: 10,
-                  }}
-                >
+                return (
                   <div
+                    key={i}
                     style={{
-                      background: isMe ? "#007bff" : "#e5e5ea",
-                      color: isMe ? "white" : "black",
-                      padding: 10,
-                      borderRadius: 16,
-                      maxWidth: "60%",
+                      display: "flex",
+                      justifyContent: isMe ? "flex-end" : "flex-start",
+                      marginBottom: 8,
                     }}
                   >
-                    {!isMe && (
-                      <div style={{ fontSize: 10, opacity: 0.6 }}>
-                        {m.sender}
-                      </div>
-                    )}
+                    <div
+                      style={{
+                        background: isMe ? "#dcf8c6" : "#fff",
+                        padding: 10,
+                        borderRadius: 10,
+                        maxWidth: "70%",
+                        boxShadow: "0 1px 1px rgba(0,0,0,0.1)",
+                      }}
+                    >
+                      {!isMe && (
+                        <div style={{ fontSize: 10, opacity: 0.6 }}>
+                          {m.sender}
+                        </div>
+                      )}
 
-                    {m.text && <div>{m.text}</div>}
+                      <div>{m.text}</div>
 
-                    {m.image && (
-                      <img
-                        src={m.image}
+                      <div
                         style={{
-                          maxWidth: "100%",
-                          borderRadius: 10,
-                          marginTop: 5,
+                          fontSize: 10,
+                          textAlign: "right",
+                          marginTop: 4,
+                          opacity: 0.6,
                         }}
-                      />
-                    )}
+                      >
+                        {m.time}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
 
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Message..."
-          />
+              <div ref={messagesEndRef} />
+            </div>
 
-          <button onClick={sendMessage}>Send</button>
-        </>
-      )}
+            {/* INPUT */}
+            <div
+              style={{
+                display: "flex",
+                padding: 10,
+                borderTop: "1px solid #ddd",
+              }}
+            >
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                style={{ flex: 1, marginRight: 10 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") sendMessage();
+                }}
+              />
+
+              <button onClick={sendMessage}>Send</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
