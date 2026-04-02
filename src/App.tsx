@@ -16,16 +16,20 @@ function App() {
 
   const roomId = "room1";
 
-  // SOCKET (mobile-safe)
+  // 🔌 SOCKET INIT (mobile-safe)
   useEffect(() => {
     const s = io(BACKEND_URL, {
       transports: ["polling", "websocket"],
     });
+
     setSocket(s);
-    return () => s.disconnect();
+
+    return () => {
+      s.disconnect();
+    };
   }, []);
 
-  // LOGIN
+  // 🔐 LOGIN
   async function login() {
     const res = await fetch(`${BACKEND_URL}/login`, {
       method: "POST",
@@ -34,11 +38,15 @@ function App() {
     });
 
     const data = await res.json();
-    if (data.success) setUser(data.username);
-    else alert(data.error);
+
+    if (data.success) {
+      setUser(data.username);
+    } else {
+      alert(data.error);
+    }
   }
 
-  // REGISTER
+  // 🔐 REGISTER
   async function register() {
     const res = await fetch(`${BACKEND_URL}/register`, {
       method: "POST",
@@ -47,11 +55,15 @@ function App() {
     });
 
     const data = await res.json();
-    if (data.success) alert("Registered!");
-    else alert(data.error);
+
+    if (data.success) {
+      alert("Registered!");
+    } else {
+      alert(data.error);
+    }
   }
 
-  // KEY SETUP
+  // 🔑 KEY SETUP
   useEffect(() => {
     if (!user || !socket) return;
 
@@ -64,7 +76,10 @@ function App() {
 
       setPrivateKey(keyPair.privateKey);
 
-      const publicKey = await crypto.subtle.exportKey("raw", keyPair.publicKey);
+      const publicKey = await crypto.subtle.exportKey(
+        "raw",
+        keyPair.publicKey
+      );
 
       socket.emit("joinRoom", {
         roomId,
@@ -76,11 +91,11 @@ function App() {
     setup();
   }, [user, socket]);
 
-  // SHARED KEY
+  // 🔐 SHARED KEY
   useEffect(() => {
     if (!socket) return;
 
-    socket.on("publicKeys", async (keys) => {
+    const handler = async (keys: any) => {
       if (!privateKey || !user) return;
 
       for (const id in keys) {
@@ -104,17 +119,19 @@ function App() {
 
         setSharedKey(key);
       }
-    });
+    };
 
-    return () => socket.off("publicKeys");
+    socket.on("publicKeys", handler);
+
+    return () => socket.off("publicKeys", handler);
   }, [socket, privateKey, user]);
 
-  // RECEIVE
+  // 📥 RECEIVE MESSAGES (FIXED)
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || !sharedKey) return;
 
-    socket.on("messages", async (msgs) => {
-      if (!sharedKey) return;
+    const handler = async (msgs: any[]) => {
+      console.log("📥 received:", msgs);
 
       const newMessages = [];
 
@@ -133,19 +150,25 @@ function App() {
             text,
           });
         } catch (e) {
-          console.log("decrypt error", e);
+          console.log("❌ decrypt failed", e);
         }
       }
 
       setMessages((prev) => [...prev, ...newMessages]);
-    });
+    };
 
-    return () => socket.off("messages");
+    socket.on("messages", handler);
+
+    return () => {
+      socket.off("messages", handler); // 🔥 CRITICAL FIX
+    };
   }, [socket, sharedKey]);
 
-  // SEND
+  // 📤 SEND MESSAGE
   async function sendMessage() {
     if (!sharedKey || !input || !user || !socket) return;
+
+    console.log("📤 sending message");
 
     const data = new TextEncoder().encode(input);
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -166,14 +189,26 @@ function App() {
     setInput("");
   }
 
+  // UI
   return (
     <div style={{ padding: 20 }}>
       {!user ? (
         <>
           <h2>Login</h2>
-          <input onChange={(e) => setUsername(e.target.value)} />
-          <input type="password" onChange={(e) => setPassword(e.target.value)} />
+
+          <input
+            placeholder="Username"
+            onChange={(e) => setUsername(e.target.value)}
+          />
+
+          <input
+            placeholder="Password"
+            type="password"
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
           <br /><br />
+
           <button onClick={login}>Login</button>
           <button onClick={register}>Register</button>
         </>
@@ -181,16 +216,21 @@ function App() {
         <>
           <h3>{user}</h3>
 
-          {messages.map((m, i) => (
-            <div key={i}>
-              {m.sender}: {m.text}
-            </div>
-          ))}
+          <div>
+            {messages.map((m, i) => (
+              <div key={i}>
+                <b>{m.sender}:</b> {m.text}
+              </div>
+            ))}
+          </div>
+
+          <br />
 
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
           />
+
           <button onClick={sendMessage}>Send</button>
         </>
       )}
