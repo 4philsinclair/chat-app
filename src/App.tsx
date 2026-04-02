@@ -28,8 +28,11 @@ function App() {
   // 🔌 SOCKET (FIXED FOR MOBILE)
   useEffect(() => {
     const s = io(BACKEND_URL, {
-      transports: ["websocket", "polling"],
-    });
+  transports: ["polling", "websocket"], // 👈 order matters!
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+});
     setSocket(s);
     return () => s.disconnect();
   }, []);
