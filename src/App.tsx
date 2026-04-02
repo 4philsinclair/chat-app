@@ -187,56 +187,83 @@ function App() {
   }
 
   // 🖼 SEND IMAGE (FIXED)
-  async function sendImage(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!sharedKey || !user) return;
+ async function sendImage(e: React.ChangeEvent<HTMLInputElement>) {
+  if (!sharedKey || !user) return;
 
-    const file = e.target.files?.[0];
-    if (!file) {
-      console.log("❌ No file selected");
-      return;
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  console.log("📷 selected:", file.name);
+
+  // 🔥 STEP 1: load image
+  const img = new Image();
+  const reader = new FileReader();
+
+  reader.onload = () => {
+    img.src = reader.result as string;
+  };
+
+  img.onload = async () => {
+    // 🔥 STEP 2: resize (VERY IMPORTANT)
+    const canvas = document.createElement("canvas");
+    const maxSize = 400;
+
+    let width = img.width;
+    let height = img.height;
+
+    if (width > height) {
+      if (width > maxSize) {
+        height *= maxSize / width;
+        width = maxSize;
+      }
+    } else {
+      if (height > maxSize) {
+        width *= maxSize / height;
+        height = maxSize;
+      }
     }
 
-    console.log("📷 file selected:", file.name);
+    canvas.width = width;
+    canvas.height = height;
 
-    const reader = new FileReader();
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-    reader.onload = async () => {
-      try {
-        const base64 = reader.result as string;
+    ctx.drawImage(img, 0, 0, width, height);
 
-        console.log("📦 base64 ready");
+    // 🔥 STEP 3: compress
+    const base64 = canvas.toDataURL("image/jpeg", 0.6);
 
-        const data = new TextEncoder().encode(base64);
-        const iv = crypto.getRandomValues(new Uint8Array(12));
+    console.log("📦 resized + compressed");
 
-        const encrypted = await crypto.subtle.encrypt(
-          { name: "AES-GCM", iv },
-          sharedKey,
-          data
-        );
+    try {
+      const data = new TextEncoder().encode(base64);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
 
-        socket.emit("sendMessage", {
-          roomId,
-          sender: user,
-          data: Array.from(new Uint8Array(encrypted)),
-          iv: Array.from(iv),
-        });
+      const encrypted = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv },
+        sharedKey,
+        data
+      );
 
-        console.log("✅ image sent");
-      } catch (err) {
-        console.error("❌ image send failed", err);
-      }
-    };
+      socket.emit("sendMessage", {
+        roomId,
+        sender: user,
+        data: Array.from(new Uint8Array(encrypted)),
+        iv: Array.from(iv),
+      });
 
-    reader.onerror = () => {
-      console.error("❌ file read error");
-    };
+      console.log("✅ image sent");
+    } catch (err) {
+      console.error("❌ encryption/send failed", err);
+    }
+  };
 
-    reader.readAsDataURL(file);
+  reader.readAsDataURL(file);
 
-    // 🔥 CRITICAL for Samsung
-    e.target.value = "";
-  }
+  // 🔥 CRITICAL (mobile fix)
+  e.target.value = "";
+}
 
   // UI
   return (
