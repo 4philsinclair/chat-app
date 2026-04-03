@@ -13,29 +13,39 @@ const io = new Server(server, {
   cors: { origin: "*" },
 });
 
-// 🔥 IN-MEMORY STORE (no DB = no bugs)
+// 🔥 in-memory storage
 let messages = [];
 let nextId = 1;
 
 io.on("connection", (socket) => {
-  console.log("connected:", socket.id);
+  console.log("CONNECTED:", socket.id);
 
+  // send history once
   socket.on("join", () => {
-    // 🔥 send history ONCE
     socket.emit("history", messages);
   });
 
-  socket.on("send", (text) => {
+  // send message
+  socket.on("send", ({ user, text }) => {
+    console.log("MESSAGE:", user, text);
+
     const msg = {
       id: nextId++,
+      user,
       text,
     };
 
     messages.push(msg);
 
-    // 🔥 send ONLY new message
     io.emit("message", msg);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("DISCONNECTED:", socket.id);
   });
 });
 
-server.listen(3000, () => console.log("server running"));
+// 🔥 network accessible
+server.listen(3000, "0.0.0.0", () => {
+  console.log("Server running on 0.0.0.0:3000");
+});
